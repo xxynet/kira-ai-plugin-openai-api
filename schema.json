@@ -1,0 +1,38 @@
+{
+  "api_key": {
+    "type": "sensitive",
+    "name": "API Key",
+    "default": "",
+    "hint": "API key for external clients. Required — requests are rejected when empty. Clients send it as Authorization: Bearer <key>",
+    "locales": {
+      "zh": {
+        "name": "API 密钥",
+        "hint": "外部客户端使用的 API 密钥。必填，留空时所有请求将被拒绝。客户端通过 Authorization: Bearer <key> 发送"
+      }
+    }
+  },
+  "default_model": {
+    "type": "string",
+    "name": "Default Model",
+    "default": "",
+    "hint": "Default model when the request omits the 'model' field. Format: provider_id:model_id. Leave empty to use KiraAI's default LLM",
+    "locales": {
+      "zh": {
+        "name": "默认模型",
+        "hint": "请求中未指定 model 时使用的默认模型。格式：provider_id:model_id。留空则使用 KiraAI 的默认 LLM"
+      }
+    }
+  },
+  "enable_request_log": {
+    "type": "switch",
+    "name": "Request Logging",
+    "default": true,
+    "hint": "Log each incoming API request (model, stream, tool usage)",
+    "locales": {
+      "zh": {
+        "name": "请求日志",
+        "hint": "记录每个 API 请求（模型、是否流式、工具使用情况）"
+      }
+    }
+  }
+}

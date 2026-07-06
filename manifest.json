@@ -1,0 +1,15 @@
+{
+  "display_name": "OpenAI API",
+  "plugin_id": "openai-api",
+  "version": "1.0.1",
+  "core_version": ">=2.26.0",
+  "author": "xxynet",
+  "description": "Expose KiraAI providers as an OpenAI-compatible API endpoint for external tools",
+  "repo": "https://github.com/xxynet/kira-ai-plugin-openai-api",
+  "locales": {
+    "zh": {
+      "display_name": "OpenAI API 兼容接口",
+      "description": "将 KiraAI 已配置的提供商暴露为 OpenAI 兼容 API 端点，供外部工具调用"
+    }
+  }
+}

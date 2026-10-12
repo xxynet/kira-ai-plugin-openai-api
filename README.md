@@ -8,6 +8,8 @@ English | [简体中文](README.zh.md)
 
 </div>
 
+Version **1.0.2** supports KiraAI **>=2.26.0,<3.0.0-alpha.1**. KiraAI v3 changes model identity and routing; use a v3-compatible plugin version on v3.
+
 ## 📖 Overview
 
 This plugin starts an OpenAI-compatible HTTP server within KiraAI, allowing external tools (Cursor, Continue, ChatBox, etc.) to use KiraAI's configured LLM providers through the standard OpenAI API format.

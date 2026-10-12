@@ -8,6 +8,8 @@
 
 </div>
 
+插件 **1.0.2** 支持 KiraAI **>=2.26.0,<3.0.0-alpha.1**。KiraAI v3 调整了模型身份与路由，v3 框架请使用适配 v3 的插件版本。
+
 ## 📖 简介
 
 本插件在 KiraAI 内部启动一个 OpenAI 兼容的 HTTP 服务，允许外部工具（Cursor、Continue、ChatBox 等）通过标准 OpenAI API 格式使用 KiraAI 已配置的 LLM 提供商。

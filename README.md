@@ -8,7 +8,7 @@ English | [简体中文](README.zh.md)
 
 </div>
 
-Version **1.0.2** supports KiraAI **>=2.26.0,<3.0.0-alpha.1**. KiraAI v3 changes model identity and routing; use a v3-compatible plugin version on v3.
+Version **1.1.0** targets KiraAI **>=3.0.0-alpha.1,<4.0.0-alpha.1**. For KiraAI v2 (>=2.26.0), use [v1.0.2](https://github.com/xxynet/kira-ai-plugin-openai-api/releases/tag/v1.0.2).
 
 ## 📖 Overview
 
@@ -21,7 +21,7 @@ This plugin starts an OpenAI-compatible HTTP server within KiraAI, allowing exte
 - 🌊 **Streaming** — real-time token streaming via `stream: true`
 - 🧠 **Reasoning models** — supports `reasoning_content` output (DeepSeek, etc.)
 - 🔐 **API key authentication** — optional Bearer token protection
-- 🎯 **Smart model routing** — resolve models by `provider_id:model_id`, `provider_name/model_id`, or plain `model_id`
+- 🎯 **Smart model routing** — resolve stable IDs, current upstream names, and unambiguous migrated aliases
 
 ## 🚀 Getting Started
 
@@ -39,14 +39,14 @@ Set the API base URL and API key in your external tool:
 |---------|-------|
 | API Base URL | `http://<kiraai-host>:5267/api/plugin/openai-api` |
 | API Key | The key you configured (or leave empty if none) |
-| Model | `provider_name/model_id` (e.g. `OpenAI/gpt-4o`) |
+| Model | A canonical ID from `GET /v1/models` (e.g. `openai:0123456789abcdef`) |
 
 ## ⚙️ Configuration
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `api_key` | sensitive | *(empty)* | API key for external clients. **Required** — all requests are rejected when empty. Clients send it as `Authorization: Bearer <key>` |
-| `default_model` | string | *(empty)* | Default model when the request omits the `model` field. Format: `provider_id:model_id`. Leave empty to use KiraAI's default LLM |
+| `default_model` | string | *(empty)* | Select an LLM using the v3 model picker; its stable `provider_id:model_id` reference is saved. Leave empty to use KiraAI's default LLM |
 
 > [!WARNING]
 > You must set an API key before using this endpoint. With an empty key, all requests will be rejected with a `401` error.
@@ -69,7 +69,8 @@ Returns all LLM models configured in KiraAI.
   "object": "list",
   "data": [
     {
-      "id": "OpenAI/gpt-4o",
+      "id": "openai:0123456789abcdef",
+      "model_name": "gpt-4o",
       "object": "model",
       "created": 0,
       "owned_by": "OpenAI"
@@ -93,7 +94,7 @@ OpenAI-compatible chat completions endpoint.
 
 ```json
 {
-  "model": "OpenAI/gpt-4o",
+  "model": "openai:0123456789abcdef",
   "messages": [
     {"role": "system", "content": "You are a helpful assistant."},
     {"role": "user", "content": "Hello!"}
@@ -129,7 +130,7 @@ OpenAI-compatible chat completions endpoint.
   "id": "chatcmpl-abc123",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "OpenAI:gpt-4o",
+  "model": "openai:0123456789abcdef",
   "choices": [
     {
       "index": 0,
@@ -152,17 +153,30 @@ OpenAI-compatible chat completions endpoint.
 
 ## 📋 Model Routing
 
-The `model` field supports three formats:
+KiraAI v3 separates a stable internal `model_id` from the upstream `model_name`. `GET /v1/models` returns canonical `provider_id:model_id` IDs and a `model_name` field for the current upstream name. Copy an ID from that endpoint for a reference that survives model/provider display-name changes.
 
 | Format | Example | Behavior |
 |--------|---------|----------|
-| `provider_id:model_id` | `openai:gpt-4o` | Explicit provider routing |
-| `provider_name/model_id` | `OpenAI/gpt-4o` | Match by display name |
-| `model_id` | `gpt-4o` | Auto-discover across all providers |
-| *(omit)* | — | Use plugin default or KiraAI default LLM |
+| `provider_id:model_id` | `openai:0123456789abcdef` | Stable, explicit LLM routing (recommended) |
+| `provider_id:model_name` | `openai:gpt-4o` | Match the current upstream name within one provider |
+| `provider_name/model_id` or `provider_name/model_name` | `OpenAI/gpt-4o` | Match by provider display name; it must identify one model |
+| `model_id` or `model_name` | `gpt-4o` | Resolve only when exactly one active LLM matches |
+| *(omit)* | — | Use the selected plugin default or KiraAI default LLM |
 
-> [!TIP]
-> Use `GET /v1/models` to see all available models with their `provider_name/model_id` identifiers.
+Unambiguous aliases preserved by KiraAI's v2 configuration migration also work, including old `provider_id:model_name` defaults. This keeps existing external clients usable while they migrate to stable references. Current upstream names containing `/` or `:` are supported; a known `provider_id:` or `provider_name/` prefix selects provider-scoped routing.
+
+Inactive/unavailable providers and non-LLM models are excluded. Unknown or ambiguous references return `404`; specify a canonical ID to disambiguate. If a provider is disabled after resolution, non-streaming requests return `503` and streaming requests emit an error followed by `[DONE]`. Upstream requests still use the framework client's `model_name`; internal IDs are never substituted for upstream model names.
+
+## Development validation
+
+Run tests against a local KiraAI v3 checkout with its dependencies installed. From this plugin directory in PowerShell:
+
+```powershell
+$env:KIRAAI_SOURCE = 'D:\path\to\KiraAI'
+python -m pytest tests/ -q
+```
+
+The tests exercise the actual v3 `ProviderManager` with local fake model clients; no upstream network calls are made.
 
 ## 🔗 Related
 

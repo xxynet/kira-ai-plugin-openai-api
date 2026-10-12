@@ -12,14 +12,15 @@
     }
   },
   "default_model": {
-    "type": "string",
+    "type": "model_select",
+    "model_type": "llm",
     "name": "Default Model",
     "default": "",
-    "hint": "Default model when the request omits the 'model' field. Format: provider_id:model_id. Leave empty to use KiraAI's default LLM",
+    "hint": "Select a KiraAI v3 LLM by its stable provider_id:model_id reference. Leave empty to use KiraAI's default LLM",
     "locales": {
       "zh": {
         "name": "默认模型",
-        "hint": "请求中未指定 model 时使用的默认模型。格式：provider_id:model_id。留空则使用 KiraAI 的默认 LLM"
+        "hint": "选择 KiraAI v3 LLM，保存稳定的 provider_id:model_id 引用。留空则使用 KiraAI 的默认 LLM"
       }
     }
   },

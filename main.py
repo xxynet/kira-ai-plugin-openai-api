@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from openai import APIStatusError, APITimeoutError, APIConnectionError
 
 from core.plugin import BasePlugin, logger, register
-from core.provider import LLMRequest, LLMStreamChunk
+from core.provider import LLMRequest, LLMStreamChunk, LLMModelClient, ModelInfo, ModelType, ProviderAPIError
 from core.agent.message import OpenAIMessage
 
 
@@ -56,62 +56,68 @@ class OpenAIAPIPlugin(BasePlugin):
 
     # ---- Model resolution ----
 
+    def _get_llm_models(self) -> list[ModelInfo]:
+        """Read active, available LLMs through the v3 provider manager."""
+        manager = self.ctx.provider_mgr
+        return [
+            info
+            for provider_id, provider in manager.get_all_providers().items()
+            if manager.get_provider(provider_id) is not None and ModelType.LLM in provider.models
+            for info in manager.get_model_infos(provider_id)
+            if info.model_type == ModelType.LLM
+        ]
+
     def _resolve_model(self, model: Optional[str]):
-        """
-        Resolve a model string to (provider_id, model_id, LLMModelClient).
-        Supported formats:
-          - 'provider_id:model_id'  — explicit provider routing
-          - 'provider_name/model_id' — used when same model exists in multiple providers
-          - 'model_id'              — auto-discover across all providers
-          - None                    — use plugin default or KiraAI default LLM
-        """
-        provider_mgr = self.ctx.provider_mgr
-        providers_config = self.ctx.config.get("providers", {})
-
-        provider_id = None
-        model_id = None
-
-        if model and ":" in model:
-            # Format: provider_id:model_id
-            parts = model.split(":", 1)
-            provider_id, model_id = parts[0], parts[1]
-        elif model and "/" in model:
-            # Format: provider_name/model_id (from /v1/models disambiguation)
-            parts = model.split("/", 1)
-            provider_name_hint, model_id = parts[0], parts[1]
-            for pid, pcfg in providers_config.items():
-                if pcfg.get("name", pid) == provider_name_hint:
-                    provider_id = pid
-                    break
-            if provider_id is None:
-                return None, None, None
-        elif model:
-            # Plain model_id — auto-discover across all providers
-            for pid, pcfg in providers_config.items():
-                model_config_root = pcfg.get("model_config") or {}
-                llm_models = model_config_root.get("llm") or {}
-                if model in llm_models:
-                    provider_id, model_id = pid, model
-                    break
-            else:
-                return None, None, None
-        else:
-            # No model specified — use plugin default or KiraAI default
-            if self._default_model and ":" in self._default_model:
-                parts = self._default_model.split(":", 1)
-                provider_id, model_id = parts[0], parts[1]
-            else:
+        """Resolve stable IDs, upstream names, or legacy aliases to an LLM."""
+        manager = self.ctx.provider_mgr
+        if model is None or model == "":
+            model = self._default_model
+            if not model:
                 try:
-                    client = provider_mgr.get_default_llm()
+                    client = manager.get_default_llm()
                     return client.model.provider_id, client.model.model_id, client
                 except Exception:
                     return None, None, None
+        if not isinstance(model, str):
+            return None, None, None
 
+        models = self._get_llm_models()
+        providers = self.ctx.config.get("providers", {})
+        provider_ids = {info.provider_id for info in models}
+        candidates = {(provider_id, model) for provider_id in provider_ids}
+        prefix, separator, identifier = model.partition(":")
+        if separator and prefix in providers:
+            candidates = {(prefix, identifier)}
+        else:
+            # Match known provider prefixes without splitting slashes in upstream names.
+            qualified = {
+                (provider_id, model[len(provider.get("name", provider_id)) + 1:])
+                for provider_id, provider in providers.items()
+                if model.startswith(f"{provider.get('name', provider_id)}/")
+            }
+            if qualified:
+                candidates = qualified
+
+        available = {(info.provider_id, info.model_id) for info in models}
+        matches = {}
+        for provider_id, identifier in candidates:
+            info = manager.get_model_info(provider_id, identifier, ModelType.LLM)
+            if info is not None and (provider_id, info.model_id) in available:
+                matches[(provider_id, info.model_id)] = info
+                if identifier == info.model_id:
+                    continue
+            for info in models:
+                if info.provider_id == provider_id and info.model_name == identifier:
+                    matches[(provider_id, info.model_id)] = info
+        # Never silently route an ambiguous name to whichever provider appears first.
+        if len(matches) != 1:
+            return None, None, None
+        info = next(iter(matches.values()))
         try:
-            client = provider_mgr.get_model_client(provider_id, model_id)
-            if client is None:
+            client = manager.get_model_client(info.provider_id, info.model_id, ModelType.LLM)
+            if not isinstance(client, LLMModelClient):
                 return None, None, None
-            return provider_id, model_id, client
+            return client.model.provider_id, client.model.model_id, client
         except Exception:
             return None, None, None
 
@@ -124,25 +130,16 @@ class OpenAIAPIPlugin(BasePlugin):
         if err:
             return err
 
-        providers_config = self.ctx.config.get("providers", {})
-
-        # Collect all LLM models, detect name conflicts across providers
-        all_models: list[tuple[str, str, str]] = []  # (provider_id, provider_name, model_id)
-        for provider_id, pcfg in providers_config.items():
-            provider_name = pcfg.get("name", provider_id)
-            model_config_root = pcfg.get("model_config") or {}
-            llm_models = model_config_root.get("llm") or {}
-            for model_id in llm_models:
-                all_models.append((provider_id, provider_name, model_id))
-
-        data = []
-        for provider_id, provider_name, model_id in all_models:
-            data.append({
-                "id": f"{provider_name}/{model_id}",
+        data = [
+            {
+                "id": f"{info.provider_id}:{info.model_id}",
+                "model_name": info.model_name,
                 "object": "model",
                 "created": 0,
-                "owned_by": provider_name,
-            })
+                "owned_by": info.provider_name,
+            }
+            for info in self._get_llm_models()
+        ]
 
         return {"object": "list", "data": data}
 
@@ -164,6 +161,8 @@ class OpenAIAPIPlugin(BasePlugin):
             return self._error_response("'messages' is required and must be a non-empty array")
 
         model_str = body.get("model")
+        if model_str is not None and not isinstance(model_str, str):
+            return self._error_response("'model' must be a string")
         stream = body.get("stream", False)
         temperature = body.get("temperature")
         max_tokens = body.get("max_tokens")
@@ -174,7 +173,7 @@ class OpenAIAPIPlugin(BasePlugin):
         provider_id, model_id, client = self._resolve_model(model_str)
         if client is None:
             return self._error_response(
-                f"Model '{model_str}' not found. Use format 'provider_id:model_id' or configure a default model.",
+                f"Model '{model_str}' not found, unavailable, or ambiguous. Use an ID from /v1/models or configure a default model.",
                 status=404,
             )
 
@@ -246,6 +245,8 @@ class OpenAIAPIPlugin(BasePlugin):
 
         try:
             response = await client.chat(request, **overrides)
+        except ProviderAPIError as e:
+            return self._error_response(f"Provider unavailable: {e}", "api_error", 503)
         except APIStatusError as e:
             return self._error_response(f"Provider error: {e.message}", "api_error", e.status_code)
         except (APITimeoutError, APIConnectionError) as e:
@@ -352,6 +353,8 @@ class OpenAIAPIPlugin(BasePlugin):
                     }
 
                     yield self._sse_chunk(chunk_dict)
+            except ProviderAPIError as e:
+                yield self._sse_chunk({"error": {"message": f"Provider unavailable: {e}", "type": "api_error"}})
             except APIStatusError as e:
                 yield self._sse_chunk({"error": {"message": f"Provider error: {e.message}", "type": "api_error"}})
             except (APITimeoutError, APIConnectionError) as e:
